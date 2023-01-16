@@ -161,9 +161,22 @@ public class Messages {
   }
 
   public enum PermissionStatus {
+    /** The user fully granted access to the requested feature. */
     GRANTED(0),
-    DENIED(1),
-    RESTRICTED(2);
+    /** The user partially granted access to the requested feature. */
+    LIMITED(1),
+    /** The user denied access to the requested feature, permission needs to be asked first. */
+    DENIED(2),
+    /**
+     * The OS denied access to the requested feature.
+     * The user cannot change this app's status.
+     */
+    RESTRICTED(3),
+    /**
+     * The user already denied twice.
+     * Permission should be asked via setting screen
+     */
+    PROMPT(4);
 
     private final int index;
     private PermissionStatus(final int index) {
@@ -939,7 +952,8 @@ public class Messages {
   public interface HealthConnectApi {
     @NonNull ConnectionCheckResult checkAvailability();
     void hasAllPermissions(@NonNull List<RecordPermission> expected, Result<PermissionCheckResult> result);
-    void openPermissionSetting(@NonNull List<RecordPermission> expected);
+    void requestPermission(@NonNull List<RecordPermission> permissions, Result<PermissionCheckResult> result);
+    void openHealthConnect(@NonNull List<RecordPermission> permissions, Result<PermissionCheckResult> result);
     void getActivities(@NonNull Long startMillsEpoch, @NonNull Long endMillsEpoch, Result<List<ActivityRecord>> result);
 
     /** The codec used by HealthConnectApi. */
@@ -1004,25 +1018,69 @@ public class Messages {
       }
       {
         BasicMessageChannel<Object> channel =
-            new BasicMessageChannel<>(binaryMessenger, "dev.flutter.pigeon.HealthConnectApi.openPermissionSetting", getCodec());
+            new BasicMessageChannel<>(binaryMessenger, "dev.flutter.pigeon.HealthConnectApi.requestPermission", getCodec());
         if (api != null) {
           channel.setMessageHandler((message, reply) -> {
             ArrayList wrapped = new ArrayList<>();
             try {
               ArrayList<Object> args = (ArrayList<Object>)message;
               assert args != null;
-              List<RecordPermission> expectedArg = (List<RecordPermission>)args.get(0);
-              if (expectedArg == null) {
-                throw new NullPointerException("expectedArg unexpectedly null.");
+              List<RecordPermission> permissionsArg = (List<RecordPermission>)args.get(0);
+              if (permissionsArg == null) {
+                throw new NullPointerException("permissionsArg unexpectedly null.");
               }
-              api.openPermissionSetting(expectedArg);
-              wrapped.add(0, null);
+              Result<PermissionCheckResult> resultCallback = new Result<PermissionCheckResult>() {
+                public void success(PermissionCheckResult result) {
+                  wrapped.add(0, result);
+                  reply.reply(wrapped);
+                }
+                public void error(Throwable error) {
+                  ArrayList<Object> wrappedError = wrapError(error);
+                  reply.reply(wrappedError);
+                }
+              };
+
+              api.requestPermission(permissionsArg, resultCallback);
             }
             catch (Error | RuntimeException exception) {
               ArrayList<Object> wrappedError = wrapError(exception);
-              wrapped = wrappedError;
+              reply.reply(wrappedError);
             }
-            reply.reply(wrapped);
+          });
+        } else {
+          channel.setMessageHandler(null);
+        }
+      }
+      {
+        BasicMessageChannel<Object> channel =
+            new BasicMessageChannel<>(binaryMessenger, "dev.flutter.pigeon.HealthConnectApi.openHealthConnect", getCodec());
+        if (api != null) {
+          channel.setMessageHandler((message, reply) -> {
+            ArrayList wrapped = new ArrayList<>();
+            try {
+              ArrayList<Object> args = (ArrayList<Object>)message;
+              assert args != null;
+              List<RecordPermission> permissionsArg = (List<RecordPermission>)args.get(0);
+              if (permissionsArg == null) {
+                throw new NullPointerException("permissionsArg unexpectedly null.");
+              }
+              Result<PermissionCheckResult> resultCallback = new Result<PermissionCheckResult>() {
+                public void success(PermissionCheckResult result) {
+                  wrapped.add(0, result);
+                  reply.reply(wrapped);
+                }
+                public void error(Throwable error) {
+                  ArrayList<Object> wrappedError = wrapError(error);
+                  reply.reply(wrappedError);
+                }
+              };
+
+              api.openHealthConnect(permissionsArg, resultCallback);
+            }
+            catch (Error | RuntimeException exception) {
+              ArrayList<Object> wrappedError = wrapError(exception);
+              reply.reply(wrappedError);
+            }
           });
         } else {
           channel.setMessageHandler(null);

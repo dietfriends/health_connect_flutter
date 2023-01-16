@@ -115,9 +115,18 @@ enum HealthConnectStatus {
 }
 
 enum PermissionStatus {
+  /// The user fully granted access to the requested feature.
   granted,
+  /// The user partially granted access to the requested feature.
+  limited,
+  /// The user denied access to the requested feature, permission needs to be asked first.
   denied,
+  /// The OS denied access to the requested feature.
+  /// The user cannot change this app's status.
   restricted,
+  /// The user already denied twice.
+  /// Permission should be asked via setting screen
+  prompt,
 }
 
 enum ExerciseType {
@@ -606,12 +615,12 @@ class HealthConnectApi {
     }
   }
 
-  Future<void> openPermissionSetting(List<RecordPermission?> arg_expected) async {
+  Future<PermissionCheckResult> requestPermission(List<RecordPermission?> arg_permissions) async {
     final BasicMessageChannel<Object?> channel = BasicMessageChannel<Object?>(
-        'dev.flutter.pigeon.HealthConnectApi.openPermissionSetting', codec,
+        'dev.flutter.pigeon.HealthConnectApi.requestPermission', codec,
         binaryMessenger: _binaryMessenger);
     final List<Object?>? replyList =
-        await channel.send(<Object?>[arg_expected]) as List<Object?>?;
+        await channel.send(<Object?>[arg_permissions]) as List<Object?>?;
     if (replyList == null) {
       throw PlatformException(
         code: 'channel-error',
@@ -623,8 +632,40 @@ class HealthConnectApi {
         message: replyList[1] as String?,
         details: replyList[2],
       );
+    } else if (replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
     } else {
-      return;
+      return (replyList[0] as PermissionCheckResult?)!;
+    }
+  }
+
+  Future<PermissionCheckResult> openHealthConnect(List<RecordPermission?> arg_permissions) async {
+    final BasicMessageChannel<Object?> channel = BasicMessageChannel<Object?>(
+        'dev.flutter.pigeon.HealthConnectApi.openHealthConnect', codec,
+        binaryMessenger: _binaryMessenger);
+    final List<Object?>? replyList =
+        await channel.send(<Object?>[arg_permissions]) as List<Object?>?;
+    if (replyList == null) {
+      throw PlatformException(
+        code: 'channel-error',
+        message: 'Unable to establish connection on channel.',
+      );
+    } else if (replyList.length > 1) {
+      throw PlatformException(
+        code: replyList[0]! as String,
+        message: replyList[1] as String?,
+        details: replyList[2],
+      );
+    } else if (replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (replyList[0] as PermissionCheckResult?)!;
     }
   }
 

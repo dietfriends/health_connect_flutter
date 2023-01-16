@@ -1,9 +1,12 @@
 package kr.balancefriends.health_connect
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
-import android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+import android.content.Intent
+import android.os.Build
 import android.util.Log
-import androidx.activity.result.contract.ActivityResultContract
+import androidx.annotation.RequiresApi
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.aggregate.AggregationResult
@@ -14,29 +17,100 @@ import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import io.flutter.plugin.common.PluginRegistry
 import kotlinx.coroutines.*
 import java.time.Duration
 import java.time.Instant
 import java.util.*
 import kotlin.reflect.KClass
 
+const val PERMISSION_REQUEST_CODE : Int = 522
+const val OPEN_HEALTH_CONNECT_APP : Int = 1149
+const val HEALTH_CONNECT_APP_PACKAGE : String = "com.google.android.apps.healthdata"
+
 /** HealthConnectPlugin */
-class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi {
+class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAware, PluginRegistry.ActivityResultListener {
     /// The MethodChannel that will the communication between Flutter and native Android
     ///
     /// This local reference serves to register the plugin with the Flutter Engine and unregister it
     /// when the Flutter Engine is detached from the Activity
     private lateinit var context: Context
+    private var activity: Activity? = null
     private val healthConnectClient by lazy { HealthConnectClient.getOrCreate(context) }
     private val coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.Main)
+    private var permissionResult: Messages.Result<Messages.PermissionCheckResult>? = null
+    private var openHealthConnectResult: Messages.Result<Messages.PermissionCheckResult>? = null
+    private lateinit var expectedPermissions: Set<HealthPermission>
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
+
         Messages.HealthConnectApi.setup(flutterPluginBinding.binaryMessenger, this)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         Messages.HealthConnectApi.setup(binding.binaryMessenger, null)
+    }
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        binding.addActivityResultListener(this)
+        activity = binding.activity
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        onDetachedFromActivity()
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+        binding.addActivityResultListener(this)
+    }
+
+    override fun onDetachedFromActivity() {
+        activity = null
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode == OPEN_HEALTH_CONNECT_APP) {
+            getPermissions(expectedPermissions, openHealthConnectResult)
+        }
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            val result = requestPermissionActivityContract.parseResult(resultCode, data)
+            Log.d("HEALTH_CONNECT", "request: $requestCode, result: $resultCode, permissions: $result")
+
+            if (result == expectedPermissions) {
+                permissionResult?.success(
+                    Messages.PermissionCheckResult.Builder()
+                        .setStatus(Messages.PermissionStatus.GRANTED).build()
+                )
+            } else {
+                // 사용불가 상태
+                if (result.isNotEmpty() && resultCode == -1) {
+                    // 일부 권한만 선택
+                    permissionResult?.success(
+                        Messages.PermissionCheckResult.Builder()
+                            .setStatus(Messages.PermissionStatus.LIMITED).build()
+                    )
+                } else if (resultCode == -1) {
+                    // 설정 Pass : 직접 권한 요청 화면으로 이동 필요
+                    permissionResult?.success(
+                        Messages.PermissionCheckResult.Builder()
+                            .setStatus(Messages.PermissionStatus.PROMPT).build()
+                    )
+                } else if (resultCode == 0) {
+                    // 권한 거부 또는 요청 불가 상태 (앱 미설치, 낮은 API 사용 등)
+                    permissionResult?.success(
+                        Messages.PermissionCheckResult.Builder()
+                            .setStatus(Messages.PermissionStatus.DENIED).build()
+                    )
+                }
+            }
+            return true
+        }
+        Log.d("HEALTH_CONNECT", "request $requestCode, result $resultCode")
+        return false
     }
 
     override fun checkAvailability(): Messages.ConnectionCheckResult {
@@ -59,43 +133,56 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi {
         expected: MutableList<Messages.RecordPermission>,
         result: Messages.Result<Messages.PermissionCheckResult>?
     ) {
-        val exceptionHandler = CoroutineExceptionHandler { _, exception ->
-            result?.error(exception)
+        val permissions = createPermissions(expected)
+        getPermissions(permissions, result)
+    }
+
+    override fun requestPermission(
+        expected: MutableList<Messages.RecordPermission>,
+        result: Messages.Result<Messages.PermissionCheckResult>?
+    ) {
+        try {
+            val permissions = createPermissions(expected)
+            permissionResult = result
+            expectedPermissions = permissions
+
+            val intent = requestPermissionActivityContract
+            activity?.startActivityForResult(intent.createIntent(context, permissions), PERMISSION_REQUEST_CODE)
+        } catch(e: ActivityNotFoundException) {
+            Log.e("HEALTH_CONNECT", "failed to run HealthConnect Application", e)
+        } catch (e: Exception) {
+            result?.error(e)
         }
+    }
 
-        coroutineScope.launch(exceptionHandler) {
-            val permissions = getPermissions(expected)
-            val granted =
-                healthConnectClient.permissionController.getGrantedPermissions(permissions)
-            Log.d("HEALTH_CONNECT", permissions.toString())
-
-            if (granted == permissions) {
-                Log.d("HEALTH_CONNECT", granted.toString())
-                result?.success(
-                    Messages.PermissionCheckResult.Builder()
-                        .setStatus(Messages.PermissionStatus.GRANTED).build()
-                )
+    override fun openHealthConnect(
+        permissions: MutableList<Messages.RecordPermission>,
+        result: Messages.Result<Messages.PermissionCheckResult>?
+    ) {
+        openHealthConnectResult = result
+        expectedPermissions = createPermissions(permissions)
+        try {
+            val intent = context.packageManager.getLaunchIntentForPackage(HEALTH_CONNECT_APP_PACKAGE)
+            if (HealthConnectClient.isProviderAvailable(context) && intent !== null) {
+                context.startActivity(intent)
+                activity?.startActivityForResult(intent, OPEN_HEALTH_CONNECT_APP)
             } else {
                 result?.success(
                     Messages.PermissionCheckResult.Builder()
-                        .setStatus(Messages.PermissionStatus.DENIED).build()
+                        .setStatus(Messages.PermissionStatus.RESTRICTED).build()
                 )
             }
+        } catch(e: ActivityNotFoundException) {
+            Log.e("HEALTH_CONNECT", "failed to run HealthConnect Application", e)
+        } catch (e: Exception) {
+            result?.error(e)
         }
     }
 
-    override fun openPermissionSetting(expected: MutableList<Messages.RecordPermission>) {
-        val permissions = getPermissions(expected)
-        val intent = permissionContract.run {
-            createIntent(context, permissions)
-        }
-        intent.addFlags(FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-    }
+    // Create the permissions launcher.
+    private val requestPermissionActivityContract = PermissionController.createRequestPermissionResultContract()
 
-    private val permissionContract: ActivityResultContract<Set<HealthPermission>, Set<HealthPermission>> =
-        PermissionController.createRequestPermissionResultContract()
-
+    @RequiresApi(Build.VERSION_CODES.O)
     override fun getActivities(
         startMillsEpoch: Long,
         endMillsEpoch: Long,
@@ -154,7 +241,47 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi {
         }
     }
 
-    private fun getPermissions(expected: MutableList<Messages.RecordPermission>): Set<HealthPermission> {
+    private fun getPermissions(
+        permissions: Set<HealthPermission>,
+        result: Messages.Result<Messages.PermissionCheckResult>?
+    ) {
+        val exceptionHandler = CoroutineExceptionHandler { _, exception ->
+
+            if (exception is IllegalStateException) {
+                result?.success(
+                    Messages.PermissionCheckResult.Builder()
+                        .setStatus(Messages.PermissionStatus.RESTRICTED).build()
+                )
+            } else {
+                result?.error(exception)
+            }
+        }
+
+        coroutineScope.launch(exceptionHandler) {
+            val granted =
+                healthConnectClient.permissionController.getGrantedPermissions(permissions)
+
+            if (granted == permissions) {
+                result?.success(
+                    Messages.PermissionCheckResult.Builder()
+                        .setStatus(Messages.PermissionStatus.GRANTED).build()
+                )
+            } else if (granted.isNotEmpty()) {
+                result?.success(
+                    Messages.PermissionCheckResult.Builder()
+                        .setStatus(Messages.PermissionStatus.LIMITED).build()
+                )
+            } else {
+                result?.success(
+                    Messages.PermissionCheckResult.Builder()
+                        .setStatus(Messages.PermissionStatus.DENIED).build()
+                )
+            }
+        }
+    }
+
+
+    private fun createPermissions(expected: MutableList<Messages.RecordPermission>): Set<HealthPermission> {
         return expected.map {
             val type = it.type.kotlin()
 
@@ -223,6 +350,7 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi {
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun androidx.health.connect.client.records.metadata.Metadata.toPigeon(): Messages.Metadata {
         val result = Messages.Metadata.Builder()
         result.setClientRecordId(this.clientRecordId)
@@ -245,6 +373,7 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi {
         return Messages.DeviceType.values()[typeNumber]
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun getActivityMetrics(
         aggregation: AggregationResult,
         start: Instant,

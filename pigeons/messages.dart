@@ -225,9 +225,18 @@ class ConnectionCheckResult {
 }
 
 enum PermissionStatus {
+  /// The user fully granted access to the requested feature.
   granted,
+  /// The user partially granted access to the requested feature.
+  limited,
+  /// The user denied access to the requested feature, permission needs to be asked first.
   denied,
+  /// The OS denied access to the requested feature.
+  /// The user cannot change this app's status.
   restricted,
+  /// The user already denied twice.
+  /// Permission should be asked via setting screen
+  prompt,
 }
 
 class PermissionCheckResult {
@@ -327,7 +336,11 @@ abstract class HealthConnectApi {
   @async
   PermissionCheckResult hasAllPermissions(List<RecordPermission> expected);
 
-  void openPermissionSetting(List<RecordPermission> expected);
+  @async
+  PermissionCheckResult requestPermission(List<RecordPermission> permissions);
+
+  @async
+  PermissionCheckResult openHealthConnect(List<RecordPermission> permissions);
 
   @async
   List<ActivityRecord> getActivities(int startMillsEpoch, int endMillsEpoch);
