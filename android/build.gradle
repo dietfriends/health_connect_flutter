@@ -1,0 +1,62 @@
+group 'kr.balancefriends.health_connect'
+version '1.0-SNAPSHOT'
+
+buildscript {
+    ext.kotlin_version = '1.7.20'
+    ext {
+        activity_compose_version = '1.5.1'
+        hilt_navigation_compose_version = '1.0.0'
+        navigation_compose_version = '2.5.1'
+
+        concurrent_futures_version = '1.1.0'
+        health_connect_version = '1.0.0-alpha08'
+        lifecycle_version = '2.5.1'
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:7.2.2'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+android {
+    compileSdkVersion 33
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = '1.8'
+        freeCompilerArgs = ['-Xjvm-default=all-compatibility']
+    }
+    sourceSets {
+        main.java.srcDirs += 'src/main/kotlin'
+    }
+
+    defaultConfig {
+        minSdkVersion 24
+    }
+}
+
+dependencies {
+    // For Health Connect
+    implementation "androidx.health.connect:connect-client:$health_connect_version"
+
+    implementation "androidx.appcompat:appcompat:1.5.1"
+}
