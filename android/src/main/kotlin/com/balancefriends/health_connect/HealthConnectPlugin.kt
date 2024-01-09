@@ -1,4 +1,4 @@
-package kr.balancefriends.health_connect
+package com.balancefriends.health_connect
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
@@ -25,11 +25,16 @@ import java.time.Duration
 import java.time.Instant
 import java.util.*
 import kotlin.reflect.KClass
+import androidx.health.connect.client.HealthConnectClient.Companion.SDK_AVAILABLE
+import androidx.activity.result.contract.ActivityResultContract
+import androidx.compose.runtime.mutableStateOf
+import java.lang.IllegalArgumentException
 
+const val HEALTH_CONNECT_SETTINGS_ACTION = "androidx.health.ACTION_HEALTH_CONNECT_SETTINGS"
 const val PERMISSION_REQUEST_CODE : Int = 522
 const val OPEN_HEALTH_CONNECT_APP : Int = 1149
-const val HEALTH_CONNECT_APP_PACKAGE : String = "com.google.android.apps.healthdata"
-
+// The minimum android level that can use Health Connect
+const val MIN_SUPPORTED_SDK = Build.VERSION_CODES.O_MR1
 /** HealthConnectPlugin */
 class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAware, PluginRegistry.ActivityResultListener {
     /// The MethodChannel that will the communication between Flutter and native Android
@@ -42,11 +47,14 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     private val coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.Main)
     private var permissionResult: Messages.Result<Messages.PermissionCheckResult>? = null
     private var openHealthConnectResult: Messages.Result<Messages.PermissionCheckResult>? = null
-    private lateinit var expectedPermissions: Set<HealthPermission>
+    private lateinit var expectedPermissions: Set<String>
+    var availability = mutableStateOf(HealthConnectAvailability.NOT_SUPPORTED)
+        private set
+
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
-
+        // checkAvailabilityInternal()
         Messages.HealthConnectApi.setup(flutterPluginBinding.binaryMessenger, this)
     }
 
@@ -113,28 +121,51 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
         return false
     }
 
-    override fun checkAvailability(): Messages.ConnectionCheckResult {
-        return if (HealthConnectClient.isApiSupported()) {
-            if (HealthConnectClient.isProviderAvailable(context)) {
-                PermissionController.createRequestPermissionResultContract()
-                Messages.ConnectionCheckResult.Builder()
-                    .setStatus(Messages.HealthConnectStatus.INSTALLED).build()
-            } else {
-                Messages.ConnectionCheckResult.Builder()
-                    .setStatus(Messages.HealthConnectStatus.NOT_INSTALLED).build()
-            }
-        } else {
-            Messages.ConnectionCheckResult.Builder()
-                .setStatus(Messages.HealthConnectStatus.NOT_SUPPORTED).build()
+    private fun checkAvailabilityInternal() {
+        availability.value = when {
+            HealthConnectClient.getSdkStatus(context) == SDK_AVAILABLE -> HealthConnectAvailability.INSTALLED
+            isSupported() -> HealthConnectAvailability.NOT_INSTALLED
+            else -> HealthConnectAvailability.NOT_SUPPORTED
         }
     }
 
+    override fun checkAvailability(): Messages.ConnectionCheckResult {
+
+        checkAvailabilityInternal()
+
+        return when(availability.value) {
+            HealthConnectAvailability.INSTALLED -> {
+                PermissionController.createRequestPermissionResultContract()
+                Messages.ConnectionCheckResult.Builder()
+                        .setStatus(Messages.HealthConnectStatus.INSTALLED).build()
+            }
+            HealthConnectAvailability.NOT_INSTALLED -> Messages.ConnectionCheckResult.Builder()
+                    .setStatus(Messages.HealthConnectStatus.NOT_INSTALLED).build()
+            HealthConnectAvailability.NOT_SUPPORTED -> Messages.ConnectionCheckResult.Builder()
+                    .setStatus(Messages.HealthConnectStatus.NOT_SUPPORTED).build()
+        }
+    }
+
+    fun requestPermissionsActivityContract(): ActivityResultContract<Set<String>, Set<String>> {
+        return PermissionController.createRequestPermissionResultContract()
+    }
+
     override fun hasAllPermissions(
-        expected: MutableList<Messages.RecordPermission>,
+        expected: List<Messages.RecordPermission>,
         result: Messages.Result<Messages.PermissionCheckResult>?
     ) {
         val permissions = createPermissions(expected)
         getPermissions(permissions, result)
+    }
+
+    /**
+     * Determines whether all the specified permissions are already granted. It is recommended to
+     * call [PermissionController.getGrantedPermissions] first in the permissions flow, as if the
+     * permissions are already granted then there is no need to request permissions via
+     * [PermissionController.createRequestPermissionResultContract].
+     */
+    suspend fun hasAllPermissionsInternal(permissions: Set<String>): Boolean {
+        return healthConnectClient.permissionController.getGrantedPermissions().containsAll(permissions)
     }
 
     override fun requestPermission(
@@ -162,10 +193,12 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
         openHealthConnectResult = result
         expectedPermissions = createPermissions(permissions)
         try {
-            val intent = context.packageManager.getLaunchIntentForPackage(HEALTH_CONNECT_APP_PACKAGE)
-            if (HealthConnectClient.isProviderAvailable(context) && intent !== null) {
-                context.startActivity(intent)
-                activity?.startActivityForResult(intent, OPEN_HEALTH_CONNECT_APP)
+            val settingsIntent = Intent()
+            settingsIntent.action = HEALTH_CONNECT_SETTINGS_ACTION
+            checkAvailabilityInternal()
+            if (availability.value == HealthConnectAvailability.INSTALLED && settingsIntent !== null) {
+                // context.startActivity(settingsIntent)
+                activity?.startActivityForResult(settingsIntent, OPEN_HEALTH_CONNECT_APP)
             } else {
                 result?.success(
                     Messages.PermissionCheckResult.Builder()
@@ -242,7 +275,7 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     }
 
     private fun getPermissions(
-        permissions: Set<HealthPermission>,
+        permissions: Set<String>,
         result: Messages.Result<Messages.PermissionCheckResult>?
     ) {
         val exceptionHandler = CoroutineExceptionHandler { _, exception ->
@@ -259,9 +292,9 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
 
         coroutineScope.launch(exceptionHandler) {
             val granted =
-                healthConnectClient.permissionController.getGrantedPermissions(permissions)
+                healthConnectClient.permissionController.getGrantedPermissions()
 
-            if (granted == permissions) {
+            if (granted.containsAll(permissions)) {
                 result?.success(
                     Messages.PermissionCheckResult.Builder()
                         .setStatus(Messages.PermissionStatus.GRANTED).build()
@@ -281,14 +314,14 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     }
 
 
-    private fun createPermissions(expected: MutableList<Messages.RecordPermission>): Set<HealthPermission> {
+    private fun createPermissions(expected: List<Messages.RecordPermission>): Set<String> {
         return expected.map {
             val type = it.type.kotlin()
 
             if (it.readonly) {
-                HealthPermission.createReadPermission(type)
+                HealthPermission.getReadPermission(type)
             } else {
-                HealthPermission.createWritePermission(type)
+                HealthPermission.getWritePermission(type)
             }
         }.toSet()
     }
@@ -308,23 +341,21 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
             Messages.RecordType.CYCLING_PEDALING_CADENCE_RECORD -> CyclingPedalingCadenceRecord::class
             Messages.RecordType.DISTANCE_RECORD -> DistanceRecord::class
             Messages.RecordType.ELEVATION_GAINED_RECORD -> ElevationGainedRecord::class
-            Messages.RecordType.EXERCISE_EVENT_RECORD -> ExerciseEventRecord::class
-            Messages.RecordType.EXERCISE_LAP_RECORD -> ExerciseLapRecord::class
-            Messages.RecordType.EXERCISE_REPETITIONS_RECORD -> ExerciseRepetitionsRecord::class
+            Messages.RecordType.ELEVATION_GAINED_RECORD -> ElevationGainedRecord::class
             Messages.RecordType.EXERCISE_SESSION_RECORD -> ExerciseSessionRecord::class
             Messages.RecordType.FLOORS_CLIMBED_RECORD -> FloorsClimbedRecord::class
             Messages.RecordType.HEART_RATE_RECORD -> HeartRateRecord::class
-            Messages.RecordType.HEART_RATE_VARIABILITY_DIFFERENTIAL_INDEX_RECORD -> HeartRateVariabilityDifferentialIndexRecord::class
+            // Messages.RecordType.HEART_RATE_VARIABILITY_DIFFERENTIAL_INDEX_RECORD -> HeartRateVariabilityDifferentialIndexRecord::class
             Messages.RecordType.HEART_RATE_VARIABILITY_RMSSD_RECORD -> HeartRateVariabilityRmssdRecord::class
-            Messages.RecordType.HEART_RATE_VARIABILITY_SD2RECORD -> HeartRateVariabilitySd2Record::class
-            Messages.RecordType.HEART_RATE_VARIABILITY_SDANN_RECORD -> HeartRateVariabilitySdannRecord::class
-            Messages.RecordType.HEART_RATE_VARIABILITY_SDNN_INDEX_RECORD -> HeartRateVariabilitySdnnIndexRecord::class
-            Messages.RecordType.HEART_RATE_VARIABILITY_SDNN_RECORD -> HeartRateVariabilitySdnnRecord::class
-            Messages.RecordType.HEART_RATE_VARIABILITY_SDSD_RECORD -> HeartRateVariabilitySdsdRecord::class
-            Messages.RecordType.HEART_RATE_VARIABILITY_SRECORD -> HeartRateVariabilitySRecord::class
-            Messages.RecordType.HEART_RATE_VARIABILITY_TINN_RECORD -> HeartRateVariabilityTinnRecord::class
+            // Messages.RecordType.HEART_RATE_VARIABILITY_SD2RECORD -> HeartRateVariabilitySd2Record::class
+            // Messages.RecordType.HEART_RATE_VARIABILITY_SDANN_RECORD -> HeartRateVariabilitySdannRecord::class
+            // Messages.RecordType.HEART_RATE_VARIABILITY_SDNN_INDEX_RECORD -> HeartRateVariabilitySdnnIndexRecord::class
+            // Messages.RecordType.HEART_RATE_VARIABILITY_SDNN_RECORD -> HeartRateVariabilitySdnnRecord::class
+            // Messages.RecordType.HEART_RATE_VARIABILITY_SDSD_RECORD -> HeartRateVariabilitySdsdRecord::class
+            // Messages.RecordType.HEART_RATE_VARIABILITY_SRECORD -> HeartRateVariabilitySRecord::class
+            // Messages.RecordType.HEART_RATE_VARIABILITY_TINN_RECORD -> HeartRateVariabilityTinnRecord::class
             Messages.RecordType.HEIGHT_RECORD -> HeightRecord::class
-            Messages.RecordType.HIP_CIRCUMFERENCE_RECORD -> HipCircumferenceRecord::class
+            // Messages.RecordType.HIP_CIRCUMFERENCE_RECORD -> HipCircumferenceRecord::class
             Messages.RecordType.HYDRATION_RECORD -> HydrationRecord::class
             Messages.RecordType.INTERMENSTRUAL_BLEEDING_RECORD -> IntermenstrualBleedingRecord::class
             Messages.RecordType.LEAN_BODY_MASS_RECORD -> LeanBodyMassRecord::class
@@ -341,12 +372,12 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
             Messages.RecordType.SPEED_RECORD -> SpeedRecord::class
             Messages.RecordType.STEPS_CADENCE_RECORD -> StepsCadenceRecord::class
             Messages.RecordType.STEPS_RECORD -> StepsRecord::class
-            Messages.RecordType.SWIMMING_STROKES_RECORD -> SwimmingStrokesRecord::class
             Messages.RecordType.TOTAL_CALORIES_BURNED_RECORD -> TotalCaloriesBurnedRecord::class
             Messages.RecordType.VO2MAX_RECORD -> Vo2MaxRecord::class
-            Messages.RecordType.WAIST_CIRCUMFERENCE_RECORD -> WaistCircumferenceRecord::class
+            // Messages.RecordType.WAIST_CIRCUMFERENCE_RECORD -> WaistCircumferenceRecord::class
             Messages.RecordType.WEIGHT_RECORD -> WeightRecord::class
             Messages.RecordType.WHEELCHAIR_PUSHES_RECORD -> WheelchairPushesRecord::class
+            else -> throw IllegalArgumentException()
         }
     }
 
@@ -493,4 +524,19 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
             }
         }
     }
+
+    private fun isSupported() = Build.VERSION.SDK_INT >= MIN_SUPPORTED_SDK
+
+}
+
+/**
+ * Health Connect requires that the underlying Health Connect APK is installed on the device.
+ * [HealthConnectAvailability] represents whether this APK is indeed installed, whether it is not
+ * installed but supported on the device, or whether the device is not supported (based on Android
+ * version).
+ */
+enum class HealthConnectAvailability {
+    INSTALLED,
+    NOT_INSTALLED,
+    NOT_SUPPORTED
 }

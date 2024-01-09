@@ -4,7 +4,7 @@ version: 0.0.1
 homepage:
 
 environment:
-  sdk: '>=2.18.4 <3.0.0'
+  sdk: ^3.0.0
   flutter: ">=2.5.0"
 
 dependencies:
@@ -35,7 +35,7 @@ flutter:
   plugin:
     platforms:
       android:
-        package: kr.balancefriends.health_connect
+        package: com.balancefriends.health_connect
         pluginClass: HealthConnectPlugin
 
   # To add assets to your plugin package, add an assets section, like this:
