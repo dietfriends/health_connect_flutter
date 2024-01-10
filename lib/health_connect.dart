@@ -2,12 +2,17 @@ import 'package:logging/logging.dart';
 
 import 'src/messages.g.dart';
 
+export 'src/messages.g.dart';
+
 final _logger = Logger('health_connect');
 
 class HealthConnect {
-  static final HealthConnectApi _api = HealthConnectApi();
+  final HealthConnectApi _api = HealthConnectApi();
 
-  static Future<ConnectionCheckResult> checkAvailability() async {
+  /// Returns an instance using the default [FirebaseApp].
+  static HealthConnect instance = HealthConnect();
+
+  Future<ConnectionCheckResult> checkAvailability() async {
     try {
       return await _api.checkAvailability();
     } catch (e, s) {
@@ -16,7 +21,7 @@ class HealthConnect {
     }
   }
 
-  static Future<PermissionCheckResult> hasAllPermissions(
+  Future<PermissionCheckResult> hasAllPermissions(
       List<RecordPermission?> expected) async {
     try {
       return await _api.hasAllPermissions(expected);
@@ -27,7 +32,7 @@ class HealthConnect {
     return await _api.hasAllPermissions(expected);
   }
 
-  static Future<PermissionCheckResult> requestPermission(
+  Future<PermissionCheckResult> requestPermission(
       List<RecordPermission?> permissions) async {
     try {
       return await _api.requestPermission(permissions);
