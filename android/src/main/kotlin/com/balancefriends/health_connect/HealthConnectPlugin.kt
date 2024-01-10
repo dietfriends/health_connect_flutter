@@ -61,14 +61,14 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     private fun onHealthConnectPermissionCallback(permissionGranted: Set<String>) {
         if (permissionGranted.isEmpty()) {
             permissionResult?.success(
-                    Messages.PermissionCheckResult.Builder()
-                            .setStatus(Messages.PermissionStatus.GRANTED).build())
+                Messages.PermissionCheckResult.Builder()
+                    .setStatus(Messages.PermissionStatus.DENIED).build())
             Log.i("HEALTH_CONNECT", "Access Denied (to Health Connect)!")
 
         } else {
             permissionResult?.success(
-                    Messages.PermissionCheckResult.Builder()
-                            .setStatus(Messages.PermissionStatus.DENIED).build())
+                Messages.PermissionCheckResult.Builder()
+                    .setStatus(Messages.PermissionStatus.GRANTED).build())
             Log.i("HEALTH_CONNECT", "Access Granted (to Health Connect)!")
         }
 
@@ -76,8 +76,8 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
-        // checkAvailabilityInternal()
         Messages.HealthConnectApi.setUp(flutterPluginBinding.binaryMessenger, this)
+        checkAvailabilityInternal()
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
