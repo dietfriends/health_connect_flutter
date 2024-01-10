@@ -5,18 +5,18 @@ homepage:
 
 environment:
   sdk: ^3.0.0
-  flutter: ">=2.5.0"
+  flutter: ">=3.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
   plugin_platform_interface: ^2.0.2
-
+  logging: '>=1.0.0 <2.0.0'
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^2.0.0
-  pigeon: ^5.0.0
+  pigeon: ^16.0.0
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 

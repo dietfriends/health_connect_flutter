@@ -55,11 +55,11 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
         // checkAvailabilityInternal()
-        Messages.HealthConnectApi.setup(flutterPluginBinding.binaryMessenger, this)
+        Messages.HealthConnectApi.setUp(flutterPluginBinding.binaryMessenger, this)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        Messages.HealthConnectApi.setup(binding.binaryMessenger, null)
+        Messages.HealthConnectApi.setUp(binding.binaryMessenger, null)
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
@@ -151,8 +151,8 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     }
 
     override fun hasAllPermissions(
-        expected: List<Messages.RecordPermission>,
-        result: Messages.Result<Messages.PermissionCheckResult>?
+        expected: MutableList<Messages.RecordPermission>,
+        result: Messages.Result<Messages.PermissionCheckResult>
     ) {
         val permissions = createPermissions(expected)
         getPermissions(permissions, result)
@@ -170,7 +170,7 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
 
     override fun requestPermission(
         expected: MutableList<Messages.RecordPermission>,
-        result: Messages.Result<Messages.PermissionCheckResult>?
+        result: Messages.Result<Messages.PermissionCheckResult>
     ) {
         try {
             val permissions = createPermissions(expected)
@@ -188,7 +188,7 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
 
     override fun openHealthConnect(
         permissions: MutableList<Messages.RecordPermission>,
-        result: Messages.Result<Messages.PermissionCheckResult>?
+        result: Messages.Result<Messages.PermissionCheckResult>
     ) {
         openHealthConnectResult = result
         expectedPermissions = createPermissions(permissions)
@@ -219,7 +219,7 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     override fun getActivities(
         startMillsEpoch: Long,
         endMillsEpoch: Long,
-        result: Messages.Result<MutableList<Messages.ActivityRecord>>?
+        result: Messages.Result<MutableList<Messages.ActivityRecord>>
     ) {
         val start = Instant.ofEpochMilli(startMillsEpoch)
         val end = Instant.ofEpochMilli(endMillsEpoch)
