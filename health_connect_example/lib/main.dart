@@ -59,7 +59,9 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _incrementCounter() {
 
-    HealthConnect.checkAvailability().then((value) => print(value));
+    HealthConnect.instance.checkAvailability().then((value) {
+      print(value.status);
+    });
 
     setState(() {
       // This call to setState tells the Flutter framework that something has
