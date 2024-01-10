@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:health_connect/health_connect.dart';
+
 void main() {
   runApp(const MyApp());
 }
@@ -58,9 +59,20 @@ class _MyHomePageState extends State<MyHomePage> {
   int _counter = 0;
 
   void _incrementCounter() {
-
     HealthConnect.instance.checkAvailability().then((value) {
       print(value.status);
+      HealthConnect.instance.requestPermission([
+        RecordPermission(type: RecordType.stepsRecord, readonly: true)
+      ]).then((value) {
+        print(value.status);
+        if (value.status == PermissionStatus.denied) {
+          HealthConnect.instance.openHealthConnect([
+            RecordPermission(type: RecordType.stepsRecord, readonly: true)
+          ]).then((value) {
+            print(value.status);
+          });
+        }
+      });
     });
 
     setState(() {

@@ -1,5 +1,8 @@
 package com.balancefriends.health_connect
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultLauncher
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -29,12 +32,15 @@ import androidx.health.connect.client.HealthConnectClient.Companion.SDK_AVAILABL
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.runtime.mutableStateOf
 import java.lang.IllegalArgumentException
+import io.flutter.plugin.common.MethodChannel.Result
 
 const val HEALTH_CONNECT_SETTINGS_ACTION = "androidx.health.ACTION_HEALTH_CONNECT_SETTINGS"
-const val PERMISSION_REQUEST_CODE : Int = 522
-const val OPEN_HEALTH_CONNECT_APP : Int = 1149
+const val PERMISSION_REQUEST_CODE: Int = 522
+const val OPEN_HEALTH_CONNECT_APP: Int = 1149
+
 // The minimum android level that can use Health Connect
 const val MIN_SUPPORTED_SDK = Build.VERSION_CODES.O_MR1
+
 /** HealthConnectPlugin */
 class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAware, PluginRegistry.ActivityResultListener {
     /// The MethodChannel that will the communication between Flutter and native Android
@@ -50,7 +56,23 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     private lateinit var expectedPermissions: Set<String>
     var availability = mutableStateOf(HealthConnectAvailability.NOT_SUPPORTED)
         private set
+    private var healthConnectRequestPermissionsLauncher: ActivityResultLauncher<Set<String>>? = null
 
+    private fun onHealthConnectPermissionCallback(permissionGranted: Set<String>) {
+        if (permissionGranted.isEmpty()) {
+            permissionResult?.success(
+                    Messages.PermissionCheckResult.Builder()
+                            .setStatus(Messages.PermissionStatus.GRANTED).build())
+            Log.i("HEALTH_CONNECT", "Access Denied (to Health Connect)!")
+
+        } else {
+            permissionResult?.success(
+                    Messages.PermissionCheckResult.Builder()
+                            .setStatus(Messages.PermissionStatus.DENIED).build())
+            Log.i("HEALTH_CONNECT", "Access Granted (to Health Connect)!")
+        }
+
+    }
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
@@ -65,6 +87,14 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         binding.addActivityResultListener(this)
         activity = binding.activity
+
+        if (availability.value == HealthConnectAvailability.INSTALLED) {
+            val requestPermissionActivityContract = PermissionController.createRequestPermissionResultContract()
+
+            healthConnectRequestPermissionsLauncher = (activity as ComponentActivity).registerForActivityResult(requestPermissionActivityContract) { granted ->
+                onHealthConnectPermissionCallback(granted);
+            }
+        }
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
@@ -72,12 +102,12 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-        activity = binding.activity
-        binding.addActivityResultListener(this)
+        onAttachedToActivity(binding)
     }
 
     override fun onDetachedFromActivity() {
         activity = null
+        healthConnectRequestPermissionsLauncher = null
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
@@ -85,37 +115,45 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
             getPermissions(expectedPermissions, openHealthConnectResult)
         }
         if (requestCode == PERMISSION_REQUEST_CODE) {
-            val result = requestPermissionActivityContract.parseResult(resultCode, data)
-            Log.d("HEALTH_CONNECT", "request: $requestCode, result: $resultCode, permissions: $result")
+            try {
+                val result = requestPermissionActivityContract.parseResult(resultCode, data)
+                Log.d("HEALTH_CONNECT", "PERMISSION_REQUEST request: $requestCode, result: $resultCode, permissions: $result")
 
-            if (result == expectedPermissions) {
-                permissionResult?.success(
-                    Messages.PermissionCheckResult.Builder()
-                        .setStatus(Messages.PermissionStatus.GRANTED).build()
-                )
-            } else {
-                // 사용불가 상태
-                if (result.isNotEmpty() && resultCode == -1) {
-                    // 일부 권한만 선택
+                if (result.containsAll(expectedPermissions)) {
                     permissionResult?.success(
-                        Messages.PermissionCheckResult.Builder()
-                            .setStatus(Messages.PermissionStatus.LIMITED).build()
+                            Messages.PermissionCheckResult.Builder()
+                                    .setStatus(Messages.PermissionStatus.GRANTED).build()
                     )
-                } else if (resultCode == -1) {
-                    // 설정 Pass : 직접 권한 요청 화면으로 이동 필요
-                    permissionResult?.success(
-                        Messages.PermissionCheckResult.Builder()
-                            .setStatus(Messages.PermissionStatus.PROMPT).build()
-                    )
-                } else if (resultCode == 0) {
-                    // 권한 거부 또는 요청 불가 상태 (앱 미설치, 낮은 API 사용 등)
-                    permissionResult?.success(
-                        Messages.PermissionCheckResult.Builder()
-                            .setStatus(Messages.PermissionStatus.DENIED).build()
-                    )
+                } else {
+                    // 사용불가 상태
+                    Log.d("HEALTH_CONNECT", "PERMISSION_REQUEST - 사용불가 상태")
+                    if (result.isNotEmpty() && resultCode == -1) {
+                        Log.d("HEALTH_CONNECT", "PERMISSION_REQUEST - 일부 권한만 선택")
+                        // 일부 권한만 선택
+                        permissionResult?.success(
+                                Messages.PermissionCheckResult.Builder()
+                                        .setStatus(Messages.PermissionStatus.LIMITED).build()
+                        )
+                    } else if (resultCode == -1) {
+                        // 설정 Pass : 직접 권한 요청 화면으로 이동 필요
+                        Log.d("HEALTH_CONNECT", "PERMISSION_REQUEST - 설정 Pass : 직접 권한 요청 화면으로 이동 필요")
+                        permissionResult?.success(
+                                Messages.PermissionCheckResult.Builder()
+                                        .setStatus(Messages.PermissionStatus.PROMPT).build()
+                        )
+                    } else if (resultCode == 0) {
+                        // 권한 거부 또는 요청 불가 상태 (앱 미설치, 낮은 API 사용 등)
+                        Log.d("HEALTH_CONNECT", "PERMISSION_REQUEST - 권한 거부 또는 요청 불가 상태 (앱 미설치, 낮은 API 사용 등)")
+                        permissionResult?.success(
+                                Messages.PermissionCheckResult.Builder()
+                                        .setStatus(Messages.PermissionStatus.DENIED).build()
+                        )
+                    }
                 }
+            } finally {
+                Log.d("HEALTH_CONNECT", "handled")
+                return true
             }
-            return true
         }
         Log.d("HEALTH_CONNECT", "request $requestCode, result $resultCode")
         return false
@@ -133,14 +171,16 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
 
         checkAvailabilityInternal()
 
-        return when(availability.value) {
+        return when (availability.value) {
             HealthConnectAvailability.INSTALLED -> {
                 PermissionController.createRequestPermissionResultContract()
                 Messages.ConnectionCheckResult.Builder()
                         .setStatus(Messages.HealthConnectStatus.INSTALLED).build()
             }
+
             HealthConnectAvailability.NOT_INSTALLED -> Messages.ConnectionCheckResult.Builder()
                     .setStatus(Messages.HealthConnectStatus.NOT_INSTALLED).build()
+
             HealthConnectAvailability.NOT_SUPPORTED -> Messages.ConnectionCheckResult.Builder()
                     .setStatus(Messages.HealthConnectStatus.NOT_SUPPORTED).build()
         }
@@ -151,8 +191,8 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     }
 
     override fun hasAllPermissions(
-        expected: MutableList<Messages.RecordPermission>,
-        result: Messages.Result<Messages.PermissionCheckResult>
+            expected: MutableList<Messages.RecordPermission>,
+            result: Messages.Result<Messages.PermissionCheckResult>
     ) {
         val permissions = createPermissions(expected)
         getPermissions(permissions, result)
@@ -169,8 +209,8 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     }
 
     override fun requestPermission(
-        expected: MutableList<Messages.RecordPermission>,
-        result: Messages.Result<Messages.PermissionCheckResult>
+            expected: MutableList<Messages.RecordPermission>,
+            result: Messages.Result<Messages.PermissionCheckResult>
     ) {
         try {
             val permissions = createPermissions(expected)
@@ -178,17 +218,24 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
             expectedPermissions = permissions
 
             val intent = requestPermissionActivityContract
-            activity?.startActivityForResult(intent.createIntent(context, permissions), PERMISSION_REQUEST_CODE)
-        } catch(e: ActivityNotFoundException) {
-            Log.e("HEALTH_CONNECT", "failed to run HealthConnect Application", e)
+            if (healthConnectRequestPermissionsLauncher == null) {
+                result.success(
+                        Messages.PermissionCheckResult.Builder()
+                                .setStatus(Messages.PermissionStatus.DENIED).build())
+                Log.i("FLUTTER_HEALTH", "Permission launcher not found")
+                return;
+            }
+            healthConnectRequestPermissionsLauncher!!.launch(permissions);
+        } catch (e: ActivityNotFoundException) {
+            Log.e("HEALTH_CONNECT", "failed to request permissions", e)
         } catch (e: Exception) {
             result?.error(e)
         }
     }
 
     override fun openHealthConnect(
-        permissions: MutableList<Messages.RecordPermission>,
-        result: Messages.Result<Messages.PermissionCheckResult>
+            permissions: MutableList<Messages.RecordPermission>,
+            result: Messages.Result<Messages.PermissionCheckResult>
     ) {
         openHealthConnectResult = result
         expectedPermissions = createPermissions(permissions)
@@ -197,15 +244,16 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
             settingsIntent.action = HEALTH_CONNECT_SETTINGS_ACTION
             checkAvailabilityInternal()
             if (availability.value == HealthConnectAvailability.INSTALLED && settingsIntent !== null) {
+                Log.d("HEALTH_CONNECT", "HealthConnectAvailability.INSTALLED")
                 // context.startActivity(settingsIntent)
                 activity?.startActivityForResult(settingsIntent, OPEN_HEALTH_CONNECT_APP)
             } else {
                 result?.success(
-                    Messages.PermissionCheckResult.Builder()
-                        .setStatus(Messages.PermissionStatus.RESTRICTED).build()
+                        Messages.PermissionCheckResult.Builder()
+                                .setStatus(Messages.PermissionStatus.RESTRICTED).build()
                 )
             }
-        } catch(e: ActivityNotFoundException) {
+        } catch (e: ActivityNotFoundException) {
             Log.e("HEALTH_CONNECT", "failed to run HealthConnect Application", e)
         } catch (e: Exception) {
             result?.error(e)
@@ -217,20 +265,20 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
 
     @RequiresApi(Build.VERSION_CODES.O)
     override fun getActivities(
-        startMillsEpoch: Long,
-        endMillsEpoch: Long,
-        result: Messages.Result<MutableList<Messages.ActivityRecord>>
+            startMillsEpoch: Long,
+            endMillsEpoch: Long,
+            result: Messages.Result<MutableList<Messages.ActivityRecord>>
     ) {
         val start = Instant.ofEpochMilli(startMillsEpoch)
         val end = Instant.ofEpochMilli(endMillsEpoch)
         val request = ReadRecordsRequest(
-            recordType = ExerciseSessionRecord::class,
-            timeRangeFilter = TimeRangeFilter.between(start, end)
+                recordType = ExerciseSessionRecord::class,
+                timeRangeFilter = TimeRangeFilter.between(start, end)
         )
 
         Log.d(
-            "HEALTH_CONNECT",
-            "Get Exercise Records between ${Date.from(start)} and ${Date.from(end)}"
+                "HEALTH_CONNECT",
+                "Get Exercise Records between ${Date.from(start)} and ${Date.from(end)}"
         )
 
         val exceptionHandler = CoroutineExceptionHandler { _, exception ->
@@ -245,14 +293,14 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
                 Log.d("HEALTH_CONNECT", it.title ?: "no title")
 
                 val aggregateRequest = AggregateRequest(
-                    metrics = setOf(
-                        TotalCaloriesBurnedRecord.ENERGY_TOTAL,
-                        StepsRecord.COUNT_TOTAL,
-                        ExerciseSessionRecord.EXERCISE_DURATION_TOTAL,
-                        DistanceRecord.DISTANCE_TOTAL,
-                        SpeedRecord.SPEED_AVG,
-                    ),
-                    timeRangeFilter = TimeRangeFilter.between(it.startTime, it.endTime)
+                        metrics = setOf(
+                                TotalCaloriesBurnedRecord.ENERGY_TOTAL,
+                                StepsRecord.COUNT_TOTAL,
+                                ExerciseSessionRecord.EXERCISE_DURATION_TOTAL,
+                                DistanceRecord.DISTANCE_TOTAL,
+                                SpeedRecord.SPEED_AVG,
+                        ),
+                        timeRangeFilter = TimeRangeFilter.between(it.startTime, it.endTime)
                 )
 
                 val aggregated = healthConnectClient.aggregate(aggregateRequest)
@@ -275,15 +323,15 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     }
 
     private fun getPermissions(
-        permissions: Set<String>,
-        result: Messages.Result<Messages.PermissionCheckResult>?
+            permissions: Set<String>,
+            result: Messages.Result<Messages.PermissionCheckResult>?
     ) {
         val exceptionHandler = CoroutineExceptionHandler { _, exception ->
 
             if (exception is IllegalStateException) {
                 result?.success(
-                    Messages.PermissionCheckResult.Builder()
-                        .setStatus(Messages.PermissionStatus.RESTRICTED).build()
+                        Messages.PermissionCheckResult.Builder()
+                                .setStatus(Messages.PermissionStatus.RESTRICTED).build()
                 )
             } else {
                 result?.error(exception)
@@ -292,22 +340,22 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
 
         coroutineScope.launch(exceptionHandler) {
             val granted =
-                healthConnectClient.permissionController.getGrantedPermissions()
+                    healthConnectClient.permissionController.getGrantedPermissions()
 
             if (granted.containsAll(permissions)) {
                 result?.success(
-                    Messages.PermissionCheckResult.Builder()
-                        .setStatus(Messages.PermissionStatus.GRANTED).build()
+                        Messages.PermissionCheckResult.Builder()
+                                .setStatus(Messages.PermissionStatus.GRANTED).build()
                 )
             } else if (granted.isNotEmpty()) {
                 result?.success(
-                    Messages.PermissionCheckResult.Builder()
-                        .setStatus(Messages.PermissionStatus.LIMITED).build()
+                        Messages.PermissionCheckResult.Builder()
+                                .setStatus(Messages.PermissionStatus.LIMITED).build()
                 )
             } else {
                 result?.success(
-                    Messages.PermissionCheckResult.Builder()
-                        .setStatus(Messages.PermissionStatus.DENIED).build()
+                        Messages.PermissionCheckResult.Builder()
+                                .setStatus(Messages.PermissionStatus.DENIED).build()
                 )
             }
         }
@@ -406,61 +454,61 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
 
     @RequiresApi(Build.VERSION_CODES.O)
     private fun getActivityMetrics(
-        aggregation: AggregationResult,
-        start: Instant,
-        end: Instant
+            aggregation: AggregationResult,
+            start: Instant,
+            end: Instant
     ): List<Messages.AggregationMetric> {
 
         val duration =
-            aggregation[ExerciseSessionRecord.EXERCISE_DURATION_TOTAL].run {
-                var duration = this?.toMillis()
-                // calculate by between
-                if (this == null) {
-                    duration = Duration.between(start, end).toMillis()
-                }
+                aggregation[ExerciseSessionRecord.EXERCISE_DURATION_TOTAL].run {
+                    var duration = this?.toMillis()
+                    // calculate by between
+                    if (this == null) {
+                        duration = Duration.between(start, end).toMillis()
+                    }
 
-                Messages.AggregationMetric.Builder()
-                    .setField(stringToMetricField("ActiveTime"))
-                    .setType(Messages.AggregationType.TOTAL)
-                    .setUnit(stringToMetricUnit("milliseconds"))
-                    .setValue(duration.toString())
-                    .build()
-            }
+                    Messages.AggregationMetric.Builder()
+                            .setField(stringToMetricField("ActiveTime"))
+                            .setType(Messages.AggregationType.TOTAL)
+                            .setUnit(stringToMetricUnit("milliseconds"))
+                            .setValue(duration.toString())
+                            .build()
+                }
 
         val steps = aggregation[StepsRecord.COUNT_TOTAL].run {
             Messages.AggregationMetric.Builder()
-                .setField(stringToMetricField("Steps"))
-                .setType(Messages.AggregationType.TOTAL)
-                .setUnit(stringToMetricUnit("count"))
-                .setValue((this ?: 0).toString())
-                .build()
+                    .setField(stringToMetricField("Steps"))
+                    .setType(Messages.AggregationType.TOTAL)
+                    .setUnit(stringToMetricUnit("count"))
+                    .setValue((this ?: 0).toString())
+                    .build()
         }
 
         val energy = aggregation[TotalCaloriesBurnedRecord.ENERGY_TOTAL].run {
             Messages.AggregationMetric.Builder()
-                .setField(stringToMetricField("TotalCaloriesBurned"))
-                .setType(Messages.AggregationType.TOTAL)
-                .setUnit(stringToMetricUnit("kiloCalories"))
-                .setValue((this?.inKilocalories ?: 0).toString())
-                .build()
+                    .setField(stringToMetricField("TotalCaloriesBurned"))
+                    .setType(Messages.AggregationType.TOTAL)
+                    .setUnit(stringToMetricUnit("kiloCalories"))
+                    .setValue((this?.inKilocalories ?: 0).toString())
+                    .build()
         }
 
         val distance = aggregation[DistanceRecord.DISTANCE_TOTAL].run {
             Messages.AggregationMetric.Builder()
-                .setField(stringToMetricField("Distance"))
-                .setType(Messages.AggregationType.TOTAL)
-                .setUnit(stringToMetricUnit("kilometer"))
-                .setValue((this?.inKilometers ?: 0).toString())
-                .build()
+                    .setField(stringToMetricField("Distance"))
+                    .setType(Messages.AggregationType.TOTAL)
+                    .setUnit(stringToMetricUnit("kilometer"))
+                    .setValue((this?.inKilometers ?: 0).toString())
+                    .build()
         }
 
         val speed = aggregation[SpeedRecord.SPEED_AVG].run {
             Messages.AggregationMetric.Builder()
-                .setField(stringToMetricField("Speed"))
-                .setType(Messages.AggregationType.AVERAGE)
-                .setUnit(stringToMetricUnit("kilometersPerHour"))
-                .setValue((this?.inKilometersPerHour ?: 0).toString())
-                .build()
+                    .setField(stringToMetricField("Speed"))
+                    .setType(Messages.AggregationType.AVERAGE)
+                    .setUnit(stringToMetricUnit("kilometersPerHour"))
+                    .setValue((this?.inKilometersPerHour ?: 0).toString())
+                    .build()
         }
 
         return listOf(duration, steps, energy, distance, speed)
@@ -468,57 +516,69 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
 
     private fun ExerciseSessionRecord.toExerciseId(): Messages.ExerciseId {
         return Messages.ExerciseId.Builder()
-            .setType(this.exerciseType.toLong())
-            .setName(ExerciseSessionRecord.EXERCISE_TYPE_INT_TO_STRING_MAP[this.exerciseType])
-            .build()
+                .setType(this.exerciseType.toLong())
+                .setName(ExerciseSessionRecord.EXERCISE_TYPE_INT_TO_STRING_MAP[this.exerciseType])
+                .build()
     }
 
-    private fun stringToMetricField(fieldName: String) : Messages.MetricField {
+    private fun stringToMetricField(fieldName: String): Messages.MetricField {
         return when (fieldName) {
             "ActiveTime" -> {
                 Messages.MetricField.ACTIVE_TIME
             }
+
             "Steps" -> {
                 Messages.MetricField.STEPS
             }
+
             "TotalCaloriesBurned" -> {
                 Messages.MetricField.TOTAL_CALORIES_BURNED
             }
+
             "Distance" -> {
                 Messages.MetricField.DISTANCE
             }
+
             "Speed" -> {
                 Messages.MetricField.SPEED
             }
+
             else -> {
                 Messages.MetricField.UNKNOWN
             }
         }
     }
 
-    private fun stringToMetricUnit(fieldName: String) : Messages.MetricUnit {
+    private fun stringToMetricUnit(fieldName: String): Messages.MetricUnit {
         return when (fieldName) {
             "minutes" -> {
                 Messages.MetricUnit.MINUTES
             }
+
             "seconds" -> {
                 Messages.MetricUnit.SECONDS
             }
+
             "milliseconds" -> {
                 Messages.MetricUnit.MILLISECONDS
             }
+
             "count" -> {
                 Messages.MetricUnit.COUNT
             }
+
             "kiloCalories" -> {
                 Messages.MetricUnit.KILO_CALORIES
             }
+
             "kilometer" -> {
                 Messages.MetricUnit.KILOMETER
             }
+
             "kilometersPerHour" -> {
                 Messages.MetricUnit.KILOMETERS_PER_HOUR
             }
+
             else -> {
                 Messages.MetricUnit.UNKNOWN
             }
