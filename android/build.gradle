@@ -9,7 +9,7 @@ buildscript {
         navigation_compose_version = '2.5.1'
 
         concurrent_futures_version = '1.1.0'
-        health_connect_version = '1.1.0-alpha02'
+        health_connect_version = '1.1.0-alpha07'
         lifecycle_version = '2.5.1'
     }
     repositories {

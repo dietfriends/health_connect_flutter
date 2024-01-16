@@ -58,19 +58,35 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   int _counter = 0;
 
-  void _incrementCounter() {
+  void _incrementCounter()  {
+      print('activity');
+      HealthConnect.instance.getActivities(
+        DateTime.now()
+            .subtract(Duration(days: 1))
+            .copyWith(hour: 0, minute: 0, second: 0)
+            .millisecondsSinceEpoch,
+        DateTime.now().millisecondsSinceEpoch,
+      ).then((value) => print(value)).catchError((e) => print(e));
+
     HealthConnect.instance.checkAvailability().then((value) {
       print(value.status);
       HealthConnect.instance.requestPermission([
-        RecordPermission(type: RecordType.stepsRecord, readonly: true)
-      ]).then((value) {
+        RecordPermission(
+            type: RecordType.exerciseSessionRecord, readonly: true),
+        RecordPermission(
+            type: RecordType.totalCaloriesBurnedRecord, readonly: true),
+        RecordPermission(
+            type: RecordType.activeCaloriesBurnedRecord, readonly: true),
+        RecordPermission(type: RecordType.distanceRecord, readonly: true),
+        RecordPermission(type: RecordType.speedRecord, readonly: true),
+        RecordPermission(type: RecordType.stepsRecord, readonly: true),
+      ]).then((value) async {
         print(value.status);
         if (value.status == PermissionStatus.denied) {
-          HealthConnect.instance.openHealthConnect([
-            RecordPermission(type: RecordType.stepsRecord, readonly: true)
-          ]).then((value) {
-            print(value.status);
-          });
+          HealthConnect.instance.openHealthConnect(
+              [RecordPermission(type: RecordType.stepsRecord, readonly: true)]);
+        } else {
+
         }
       });
     });

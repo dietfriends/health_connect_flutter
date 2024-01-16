@@ -42,7 +42,8 @@ const val OPEN_HEALTH_CONNECT_APP: Int = 1149
 const val MIN_SUPPORTED_SDK = Build.VERSION_CODES.O_MR1
 
 /** HealthConnectPlugin */
-class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAware, PluginRegistry.ActivityResultListener {
+class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAware,
+        PluginRegistry.ActivityResultListener {
     /// The MethodChannel that will the communication between Flutter and native Android
     ///
     /// This local reference serves to register the plugin with the Flutter Engine and unregister it
@@ -61,14 +62,16 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
     private fun onHealthConnectPermissionCallback(permissionGranted: Set<String>) {
         if (permissionGranted.isEmpty()) {
             permissionResult?.success(
-                Messages.PermissionCheckResult.Builder()
-                    .setStatus(Messages.PermissionStatus.DENIED).build())
+                    Messages.PermissionCheckResult.Builder()
+                            .setStatus(Messages.PermissionStatus.DENIED).build()
+            )
             Log.i("HEALTH_CONNECT", "Access Denied (to Health Connect)!")
 
         } else {
             permissionResult?.success(
-                Messages.PermissionCheckResult.Builder()
-                    .setStatus(Messages.PermissionStatus.GRANTED).build())
+                    Messages.PermissionCheckResult.Builder()
+                            .setStatus(Messages.PermissionStatus.GRANTED).build()
+            )
             Log.i("HEALTH_CONNECT", "Access Granted (to Health Connect)!")
         }
 
@@ -91,9 +94,10 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
         if (availability.value == HealthConnectAvailability.INSTALLED) {
             val requestPermissionActivityContract = PermissionController.createRequestPermissionResultContract()
 
-            healthConnectRequestPermissionsLauncher = (activity as ComponentActivity).registerForActivityResult(requestPermissionActivityContract) { granted ->
-                onHealthConnectPermissionCallback(granted);
-            }
+            healthConnectRequestPermissionsLauncher =
+                    (activity as ComponentActivity).registerForActivityResult(requestPermissionActivityContract) { granted ->
+                        onHealthConnectPermissionCallback(granted);
+                    }
         }
     }
 
@@ -117,7 +121,10 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
         if (requestCode == PERMISSION_REQUEST_CODE) {
             try {
                 val result = requestPermissionActivityContract.parseResult(resultCode, data)
-                Log.d("HEALTH_CONNECT", "PERMISSION_REQUEST request: $requestCode, result: $resultCode, permissions: $result")
+                Log.d(
+                        "HEALTH_CONNECT",
+                        "PERMISSION_REQUEST request: $requestCode, result: $resultCode, permissions: $result"
+                )
 
                 if (result.containsAll(expectedPermissions)) {
                     permissionResult?.success(
@@ -221,7 +228,8 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
             if (healthConnectRequestPermissionsLauncher == null) {
                 result.success(
                         Messages.PermissionCheckResult.Builder()
-                                .setStatus(Messages.PermissionStatus.DENIED).build())
+                                .setStatus(Messages.PermissionStatus.DENIED).build()
+                )
                 Log.i("FLUTTER_HEALTH", "Permission launcher not found")
                 return;
             }
@@ -278,11 +286,14 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
 
         Log.d(
                 "HEALTH_CONNECT",
-                "Get Exercise Records between ${Date.from(start)} and ${Date.from(end)}"
+                "Get Exercise Records between ${start} and ${end}"
         )
 
         val exceptionHandler = CoroutineExceptionHandler { _, exception ->
+
+            Log.e("HEALTH_CONNECT", "failed to read records : $exception")
             result?.error(exception)
+
         }
         coroutineScope.launch(exceptionHandler) {
             val recordResult = healthConnectClient.readRecords(request)
@@ -291,6 +302,7 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
             val items = recordResult.records.map {
                 Log.d("HEALTH_CONNECT", it.exerciseType.toString())
                 Log.d("HEALTH_CONNECT", it.title ?: "no title")
+
 
                 val aggregateRequest = AggregateRequest(
                         metrics = setOf(
@@ -303,7 +315,10 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
                         timeRangeFilter = TimeRangeFilter.between(it.startTime, it.endTime)
                 )
 
+
+                Log.d("HEALTH_CONNECT", "aggregate")
                 val aggregated = healthConnectClient.aggregate(aggregateRequest)
+
                 val activityResults = getActivityMetrics(aggregated, it.startTime, it.endTime)
 
                 val sessionResult = Messages.ActivityRecord.Builder()
@@ -315,7 +330,8 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
                 sessionResult.setMetadata(it.metadata.toPigeon())
                 sessionResult.setMetrics(activityResults)
 
-                return@map sessionResult.build()
+                sessionResult.build()
+
             }
 
             result?.success(items.toMutableList())
@@ -416,7 +432,7 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
             Messages.RecordType.RESTING_HEART_RATE_RECORD -> RestingHeartRateRecord::class
             Messages.RecordType.SEXUAL_ACTIVITY_RECORD -> SexualActivityRecord::class
             Messages.RecordType.SLEEP_SESSION_RECORD -> SleepSessionRecord::class
-            Messages.RecordType.SLEEP_STAGE_RECORD -> SleepStageRecord::class
+            // Messages.RecordType.SLEEP_STAGE_RECORD -> SleepStageRecord::class
             Messages.RecordType.SPEED_RECORD -> SpeedRecord::class
             Messages.RecordType.STEPS_CADENCE_RECORD -> StepsCadenceRecord::class
             Messages.RecordType.STEPS_RECORD -> StepsRecord::class
