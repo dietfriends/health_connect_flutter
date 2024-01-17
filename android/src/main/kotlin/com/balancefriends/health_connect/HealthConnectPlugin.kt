@@ -310,7 +310,8 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
                                 StepsRecord.COUNT_TOTAL,
                                 ExerciseSessionRecord.EXERCISE_DURATION_TOTAL,
                                 DistanceRecord.DISTANCE_TOTAL,
-                                SpeedRecord.SPEED_AVG,
+                                // TODO: Unsupported aggregation type
+                                // SpeedRecord.SPEED_AVG,
                         ),
                         timeRangeFilter = TimeRangeFilter.between(it.startTime, it.endTime)
                 )
