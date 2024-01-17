@@ -304,15 +304,20 @@ class HealthConnectPlugin : FlutterPlugin, Messages.HealthConnectApi, ActivityAw
                 Log.d("HEALTH_CONNECT", it.title ?: "no title")
 
 
+                val metrics = mutableSetOf(
+                        TotalCaloriesBurnedRecord.ENERGY_TOTAL,
+                        StepsRecord.COUNT_TOTAL,
+                        ExerciseSessionRecord.EXERCISE_DURATION_TOTAL,
+                        DistanceRecord.DISTANCE_TOTAL,
+                )
+                if ( Build.VERSION.SDK_INT <= Build.VERSION_CODES.TIRAMISU ) {
+                    // TODO: Unsupported aggregation type SpeedSeries_speed_avg
+                    // RequestConverters.kt:141
+                    metrics.add(SpeedRecord.SPEED_AVG)
+                }
+
                 val aggregateRequest = AggregateRequest(
-                        metrics = setOf(
-                                TotalCaloriesBurnedRecord.ENERGY_TOTAL,
-                                StepsRecord.COUNT_TOTAL,
-                                ExerciseSessionRecord.EXERCISE_DURATION_TOTAL,
-                                DistanceRecord.DISTANCE_TOTAL,
-                                // TODO: Unsupported aggregation type
-                                // SpeedRecord.SPEED_AVG,
-                        ),
+                        metrics = metrics,
                         timeRangeFilter = TimeRangeFilter.between(it.startTime, it.endTime)
                 )
 
